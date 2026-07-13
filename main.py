@@ -1,31 +1,43 @@
 import os
 import json
-import requests
 import uvicorn
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from openai import OpenAI
 
-app = FastAPI(title="GraphRAG Pipeline")
+app = FastAPI(title="GraphRAG Pipeline Server")
+
+# Enable global routing safety parameters 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ----------------------------------------------------------------
-# Configuration
+# Configuration & Client Initialization
 # ----------------------------------------------------------------
 
 AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
-
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-# Correct Chat Completions router path
-AIPIPE_URL = "https://aipipe.org/openrouter/v1/chat/completions"
+# Standardized SDK Initialization matching your working project
+client = OpenAI(
+    api_key=AIPIPE_TOKEN,
+    base_url="https://aipipe.org/openrouter/v1"
+)
 
-# Note: Change to "google/gemini-2.5-flash:free" if your token runs out of paid balance
-MODEL_NAME = "openai/gpt-4.1-nano"
+# Using the exact working free-tier model identifier
+MODEL_NAME = "google/gemini-2.5-flash"
 
 # ----------------------------------------------------------------
-# Request Models
+# Request Data Validation Models
 # ----------------------------------------------------------------
 
 class ExtractRequest(BaseModel):
@@ -45,148 +57,87 @@ class CommunitySummaryRequest(BaseModel):
 
 
 # ----------------------------------------------------------------
-# Helper Function
+# Helper Function (Leveraging the robust SDK wrapper layout)
 # ----------------------------------------------------------------
 
-def call_aipipe_llm(prompt: str) -> dict:
-    headers = {
-        "Authorization": f"Bearer {AIPIPE_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    # Structured prompt payloads for OpenRouter schema execution validation
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant designed to output JSON."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "response_format": {
-            "type": "json_object"
-        }
-    }
-
+def ask_graphrag_llm(prompt: str) -> dict:
     try:
-        response = requests.post(
-            AIPIPE_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a precise data engine. You must output valid JSON only matching the requested schema layout."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ]
         )
-
-        print("Status Code:", response.status_code)
         
-        # Capture raw validation block diagnostics directly inside Render logs if validation drops
-        if response.status_code == 400:
-            print("Server Error Message details:", response.text)
-            
-        response.raise_for_status()
-
-        result = response.json()
-        content = result["choices"][0]["message"]["content"].strip()
-
-        # --- Markdown Code Block Sanitization ---
-        if content.startswith("```"):
-            if "\n" in content:
-                content = content.split("\n", 1)[1]
+        raw_content = response.choices[0].message.content.strip()
+        
+        # Strip code fences dynamically if appended by markdown defaults
+        if raw_content.startswith("```"):
+            if "\n" in raw_content:
+                raw_content = raw_content.split("\n", 1)[1]
             else:
-                content = content.lstrip("`json").lstrip("`")
-                
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
+                raw_content = raw_content.lstrip("`json").lstrip("`")
+        if raw_content.endswith("```"):
+            raw_content = raw_content.rsplit("```", 1)[0]
             
-        content = content.strip()
-        # ----------------------------------------
-
-        return json.loads(content)
-
-    except requests.exceptions.RequestException as e:
+        return json.loads(raw_content.strip())
+        
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"AIPipe request failed: {str(e)}"
-        )
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"LLM returned invalid or poorly formatted response: {str(e)}"
+            detail=f"Automated LLM pipeline processing error: {str(e)}"
         )
 
 
 # ----------------------------------------------------------------
-# Health Endpoints
+# Operational Status Check Endpoints
 # ----------------------------------------------------------------
 
 @app.get("/")
 def root():
-    return {
-        "status": "running",
-        "service": "GraphRAG Pipeline"
-    }
+    return {"status": "running", "service": "GraphRAG Pipeline"}
 
 
 @app.get("/health")
 def health():
-    return {
-        "ok": True
-    }
+    return {"ok": True}
 
 
 # ----------------------------------------------------------------
-# Endpoint 1
+# Endpoint 1: POST /extract-graph
 # ----------------------------------------------------------------
 
 @app.post("/extract-graph")
 async def extract_graph(data: ExtractRequest):
-
     prompt = f"""
-Extract entities and relationships from the following text.
+Extract entities and relationships from the text chunk below.
 
-Allowed Entity Types:
-- Person
-- Organization
-- Product
-- Framework
-
-Allowed Relationship Types:
-- CREATED
-- FOUNDED
-- DEVELOPED
-- INTEGRATED_INTO
-- HIRED
-- AUTHORED
-
-Return ONLY valid JSON.
+Allowed Entity Types: [Person, Organization, Product, Framework]
+Allowed Relationship Types: [CREATED, FOUNDED, DEVELOPED, INTEGRATED_INTO, HIRED, AUTHORED]
 
 Text:
 {data.text}
 
-JSON format:
-
+Return validation data ONLY inside this explicit JSON target schema format:
 {{
-  "entities":[
-    {{
-      "name":"",
-      "type":""
-    }}
+  "entities": [
+    {{"name": "Entity Name", "type": "Type"}}
   ],
-  "relationships":[
-    {{
-      "source":"",
-      "target":"",
-      "relation":""
-    }}
+  "relationships": [
+    {{"source": "Source Name", "target": "Target Name", "relation": "RELATION_TYPE"}}
   ]
 }}
 """
-
-    result = call_aipipe_llm(prompt)
-
+    result = ask_graphrag_llm(prompt)
     return {
         "entities": result.get("entities", []),
         "relationships": result.get("relationships", [])
@@ -194,93 +145,78 @@ JSON format:
 
 
 # ----------------------------------------------------------------
-# Endpoint 2
+# Endpoint 2: POST /graph-query
 # ----------------------------------------------------------------
 
 @app.post("/graph-query")
 async def graph_query(data: GraphQueryRequest):
-
-    entities = "\n".join(
-        f"{e['name']} ({e['type']})"
-        for e in data.graph.get("entities", [])
+    entities_block = "\n".join(
+        f"- {e['name']} ({e['type']})" for e in data.graph.get("entities", [])
     )
-
-    relationships = "\n".join(
-        f"{r['source']} -> {r['relation']} -> {r['target']}"
-        for r in data.graph.get("relationships", [])
+    relationships_block = "\n".join(
+        f"- {r['source']} -> {r['relation']} -> {r['target']}" for r in data.graph.get("relationships", [])
     )
 
     prompt = f"""
-Answer the question ONLY using the supplied knowledge graph.
+Perform step-by-step navigation across the graph data map below to solve the given question.
 
+Knowledge Graph Context:
 Entities:
-
-{entities}
+{entities_block}
 
 Relationships:
+{relationships_block}
 
-{relationships}
-
-Question:
-
+User Question:
 {data.question}
 
-If the answer cannot be inferred from the graph, return
-
+If the question cannot be safely answered from the facts above, return exactly:
 {{
-  "answer":"Unknown",
-  "reasoning_path":[],
-  "hops":0
+  "answer": "Unknown",
+  "reasoning_path": [],
+  "hops": 0
 }}
 
-Otherwise return ONLY JSON in this format
-
+Otherwise, list every node name traversed in sequence inside reasoning_path and return:
 {{
-  "answer":"",
-  "reasoning_path":["","",""],
-  "hops":2
+  "answer": "Final extracted answer node string",
+  "reasoning_path": ["First Node", "Second Node", "Third Node"],
+  "hops": 2
 }}
 """
-
-    result = call_aipipe_llm(prompt)
-
+    result = ask_graphrag_llm(prompt)
     return {
         "answer": result.get("answer", "Unknown"),
         "reasoning_path": result.get("reasoning_path", []),
-        "hops": result.get("hops", 0)
+        "hops": int(result.get("hops", 0))
     }
 
 
 # ----------------------------------------------------------------
-# Endpoint 3
+# Endpoint 3: POST /community-summary
 # ----------------------------------------------------------------
 
 @app.post("/community-summary")
 async def community_summary(data: CommunitySummaryRequest):
-
-    relationships = "\n".join(
-        f"{r.get('source')} -> {r.get('relation')} -> {r.get('target')}"
-        for r in data.relationships
+    relationships_block = "\n".join(
+        f"- {r.get('source')} -> {r.get('relation')} -> {r.get('target')}" for r in data.relationships
     )
 
     prompt = f"""
-Summarize the following graph community.
+Generate a clear summary outlining the thematic connections inside this sub-community group.
 
 Entities:
-{", ".join(data.entities)}
+{', '.join(data.entities)}
 
-Relationships:
-{relationships}
+Relationships Map:
+{relationships_block}
 
-Return ONLY valid JSON.
-
+Return exactly in this JSON format structure:
 {{
-  "summary":""
+  "summary": "Detailed context summary text explaining the structural entity relationships."
 }}
 """
-
-    result = call_aipipe_llm(prompt)
-
+    result = ask_graphrag_llm(prompt)
     return {
         "community_id": data.community_id,
         "summary": result.get("summary", "")
@@ -288,15 +224,9 @@ Return ONLY valid JSON.
 
 
 # ----------------------------------------------------------------
-# Run Server
+# Thread Engine Run Hook
 # ----------------------------------------------------------------
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
-
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
