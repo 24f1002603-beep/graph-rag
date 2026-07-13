@@ -18,10 +18,11 @@ AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-# FIX: Pointed directly to the chat completions API endpoint
+# Correct Chat Completions router path
 AIPIPE_URL = "https://aipipe.org/openrouter/v1/chat/completions"
-# Change the model name to a free tier model
-MODEL_NAME = "google/gemini-2.5-flash:free"
+
+# Note: Change to "google/gemini-2.5-flash:free" if your token runs out of paid balance
+MODEL_NAME = "openai/gpt-4.1-nano"
 
 # ----------------------------------------------------------------
 # Request Models
@@ -53,9 +54,14 @@ def call_aipipe_llm(prompt: str) -> dict:
         "Content-Type": "application/json",
     }
 
+    # Structured prompt payloads for OpenRouter schema execution validation
     payload = {
         "model": MODEL_NAME,
         "messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant designed to output JSON."
+            },
             {
                 "role": "user",
                 "content": prompt
@@ -75,13 +81,17 @@ def call_aipipe_llm(prompt: str) -> dict:
         )
 
         print("Status Code:", response.status_code)
+        
+        # Capture raw validation block diagnostics directly inside Render logs if validation drops
+        if response.status_code == 400:
+            print("Server Error Message details:", response.text)
+            
         response.raise_for_status()
 
         result = response.json()
         content = result["choices"][0]["message"]["content"].strip()
 
         # --- Markdown Code Block Sanitization ---
-        # Strips out any decorative ```json wrappers if the LLM includes them
         if content.startswith("```"):
             if "\n" in content:
                 content = content.split("\n", 1)[1]
