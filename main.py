@@ -10,7 +10,6 @@ from openai import OpenAI
 
 app = FastAPI(title="GraphRAG Pipeline Server")
 
-# Enable global routing safety parameters 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,13 +26,13 @@ AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-# Standardized SDK Initialization matching your working project
+# Initialize the OpenAI client pointing directly to OpenRouter's gateway
 client = OpenAI(
     api_key=AIPIPE_TOKEN,
-    base_url="https://aipipe.org/openrouter/v1"
+    base_url="https://openrouter.ai/api/v1"
 )
 
-# Using the exact working free-tier model identifier
+# Using the explicit Gemini model tag that maps perfectly to OpenRouter's structured framework
 MODEL_NAME = "google/gemini-2.5-flash"
 
 # ----------------------------------------------------------------
@@ -57,19 +56,20 @@ class CommunitySummaryRequest(BaseModel):
 
 
 # ----------------------------------------------------------------
-# Helper Function (Leveraging the robust SDK wrapper layout)
+# Helper Function
 # ----------------------------------------------------------------
 
 def ask_graphrag_llm(prompt: str) -> dict:
     try:
+        # OpenRouter requires specific parameters to route schema calls to Gemini models smoothly
         response = client.chat.completions.create(
             model=MODEL_NAME,
             temperature=0,
-            response_format={"type": "json_object"},
+            # We enforce JSON inside the system prompt directly to avoid gateway 402/400 parameter rejections
             messages=[
                 {
                     "role": "system", 
-                    "content": "You are a precise data engine. You must output valid JSON only matching the requested schema layout."
+                    "content": "You are a precise backend parsing data engine. You must output raw, valid JSON only. Do not wrap code in markdown blocks."
                 },
                 {
                     "role": "user", 
@@ -80,7 +80,7 @@ def ask_graphrag_llm(prompt: str) -> dict:
         
         raw_content = response.choices[0].message.content.strip()
         
-        # Strip code fences dynamically if appended by markdown defaults
+        # Clean up text if the model appends decorative markdown wrappers anyway
         if raw_content.startswith("```"):
             if "\n" in raw_content:
                 raw_content = raw_content.split("\n", 1)[1]
@@ -99,7 +99,7 @@ def ask_graphrag_llm(prompt: str) -> dict:
 
 
 # ----------------------------------------------------------------
-# Operational Status Check Endpoints
+# Status Endpoints
 # ----------------------------------------------------------------
 
 @app.get("/")
@@ -222,10 +222,6 @@ Return exactly in this JSON format structure:
         "summary": result.get("summary", "")
     }
 
-
-# ----------------------------------------------------------------
-# Thread Engine Run Hook
-# ----------------------------------------------------------------
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
