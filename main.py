@@ -20,7 +20,8 @@ if not AIPIPE_TOKEN:
 
 # FIX: Pointed directly to the chat completions API endpoint
 AIPIPE_URL = "https://aipipe.org/openrouter/v1/chat/completions"
-MODEL_NAME = "openai/gpt-4.1-nano"
+# Change the model name to a free tier model
+MODEL_NAME = "google/gemini-2.5-flash:free"
 
 # ----------------------------------------------------------------
 # Request Models
