@@ -65,17 +65,20 @@ def call_aipipe_llm(prompt: str) -> dict:
     }
 
     try:
-        response = requests.post(
-            AIPIPE_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
+       response = requests.post(
+                         AIPIPE_URL,
+                         headers=headers,
+                         json=payload,
+                         timeout=60
+                        )
+
+        print("Status Code:", response.status_code)
+        print("Response Body:", response.text)
 
         response.raise_for_status()
 
         result = response.json()
-
+ 
         content = result["choices"][0]["message"]["content"]
 
         return json.loads(content)
