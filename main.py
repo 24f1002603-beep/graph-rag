@@ -18,7 +18,7 @@ AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-AIPIPE_URL = "https://aipipe.org/openrouter/v1/chat/completions"
+AIPIPE_URL = "https://aipipe.org/openrouter/v1"
 MODEL_NAME = "openai/gpt-4.1-nano"
 
 # ----------------------------------------------------------------
