@@ -18,7 +18,8 @@ AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-AIPIPE_URL = "https://aipipe.org/openrouter/v1"
+# FIX: Pointed directly to the chat completions API endpoint
+AIPIPE_URL = "https://aipipe.org/openrouter/v1/chat/completions"
 MODEL_NAME = "openai/gpt-4.1-nano"
 
 # ----------------------------------------------------------------
@@ -73,13 +74,24 @@ def call_aipipe_llm(prompt: str) -> dict:
         )
 
         print("Status Code:", response.status_code)
-        print("Response Body:", response.text)
-
         response.raise_for_status()
 
         result = response.json()
+        content = result["choices"][0]["message"]["content"].strip()
 
-        content = result["choices"][0]["message"]["content"]
+        # --- Markdown Code Block Sanitization ---
+        # Strips out any decorative ```json wrappers if the LLM includes them
+        if content.startswith("```"):
+            if "\n" in content:
+                content = content.split("\n", 1)[1]
+            else:
+                content = content.lstrip("`json").lstrip("`")
+                
+        if content.endswith("```"):
+            content = content.rsplit("```", 1)[0]
+            
+        content = content.strip()
+        # ----------------------------------------
 
         return json.loads(content)
 
@@ -88,11 +100,10 @@ def call_aipipe_llm(prompt: str) -> dict:
             status_code=500,
             detail=f"AIPipe request failed: {str(e)}"
         )
-
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
         raise HTTPException(
             status_code=500,
-            detail="LLM returned invalid JSON."
+            detail=f"LLM returned invalid or poorly formatted response: {str(e)}"
         )
 
 
