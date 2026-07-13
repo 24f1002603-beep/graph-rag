@@ -26,13 +26,13 @@ AIPIPE_TOKEN = os.getenv("AIPIPE_TOKEN")
 if not AIPIPE_TOKEN:
     raise RuntimeError("AIPIPE_TOKEN environment variable not set.")
 
-# Initialize the OpenAI client pointing directly to OpenRouter's gateway
+# FIX: Restored the exact working base_url proxy endpoint from your invoice parser
 client = OpenAI(
     api_key=AIPIPE_TOKEN,
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://aipipe.org/openrouter/v1"
 )
 
-# Using the explicit Gemini model tag that maps perfectly to OpenRouter's structured framework
+# Using the working Gemini model tag
 MODEL_NAME = "google/gemini-2.5-flash"
 
 # ----------------------------------------------------------------
@@ -61,11 +61,9 @@ class CommunitySummaryRequest(BaseModel):
 
 def ask_graphrag_llm(prompt: str) -> dict:
     try:
-        # OpenRouter requires specific parameters to route schema calls to Gemini models smoothly
         response = client.chat.completions.create(
             model=MODEL_NAME,
             temperature=0,
-            # We enforce JSON inside the system prompt directly to avoid gateway 402/400 parameter rejections
             messages=[
                 {
                     "role": "system", 
@@ -80,7 +78,7 @@ def ask_graphrag_llm(prompt: str) -> dict:
         
         raw_content = response.choices[0].message.content.strip()
         
-        # Clean up text if the model appends decorative markdown wrappers anyway
+        # Clean up text if the model appends decorative markdown wrappers
         if raw_content.startswith("```"):
             if "\n" in raw_content:
                 raw_content = raw_content.split("\n", 1)[1]
